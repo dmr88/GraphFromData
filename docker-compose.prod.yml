@@ -1,0 +1,81 @@
+# =====================================================================
+# Production: проект на db.zweb.kz:8080 рядом с BitrixVM (он держит 80/443).
+#
+# Запуск:
+#   cp .env.prod.example .env
+#   nano .env                    # вписать сильные пароли
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# После старта: http://db.zweb.kz:8080
+# =====================================================================
+
+services:
+
+  db:
+    image: mariadb:10.11
+    container_name: gfd-db-prod
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD не задан в .env}
+      MARIADB_DATABASE: graph_from_data
+      MARIADB_USER: gfd_user
+      MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD не задан в .env}
+      MARIADB_CHARACTER_SET_SERVER: utf8mb4
+      MARIADB_COLLATION_SERVER: utf8mb4_unicode_ci
+    # ВНИМАНИЕ: порт не пробрасываем наружу — БД доступна только из gfd-сети.
+    # Если нужен внешний доступ для администрирования — добавьте expose 127.0.0.1:3307:3306.
+    volumes:
+      - dbdata-prod:/var/lib/mysql
+      - ./backend/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/sql/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    image: gfd-web:prod
+    container_name: gfd-web-prod
+    restart: unless-stopped
+    environment:
+      GFD_DB_HOST: db
+      GFD_DB_PORT: 3306
+      GFD_DB_NAME: graph_from_data
+      GFD_DB_USER: gfd_user
+      GFD_DB_PASS: ${DB_PASSWORD}
+      GFD_DB_CHARSET: utf8mb4
+      # CORS: фронт и API на одном origin — нужен только для запасных вариантов
+      GFD_CORS_ALLOWED_ORIGINS: "http://db.zweb.kz:8080,https://db.zweb.kz:8443"
+      GFD_MAX_UPLOAD_SIZE: "20971520"
+    ports:
+      - "8080:80"   # порт 8080 на хосте → 80 в контейнере
+    volumes:
+      # uploads — отдельный volume, чтобы загруженные xlsx переживали пересборку
+      - uploads-prod:/var/www/html/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Одноразовый сервис создания админа: docker compose --profile setup run --rm admin-setup
+  admin-setup:
+    image: gfd-web:prod
+    container_name: gfd-admin-setup
+    profiles: ["setup"]
+    environment:
+      GFD_DB_HOST: db
+      GFD_DB_NAME: graph_from_data
+      GFD_DB_USER: gfd_user
+      GFD_DB_PASS: ${DB_PASSWORD}
+    working_dir: /var/www/html
+    command: ["php", "scripts/create_admin.php", "${ADMIN_USER:-admin}", "${ADMIN_PASS:?ADMIN_PASS не задан}"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dbdata-prod:
+  uploads-prod:

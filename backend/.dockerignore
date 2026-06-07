@@ -1,0 +1,8 @@
+vendor/
+uploads/*
+!uploads/.gitkeep
+api/config.php
+*.log
+.git
+.gitignore
+README.md

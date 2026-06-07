@@ -1,0 +1,57 @@
+# =====================================================================
+# Корневой .htaccess для production-сборки.
+# Apache отдаёт фронт (SPA) + проксирует /api/* в PHP-эндпоинты.
+# =====================================================================
+
+# Защита служебных файлов
+<FilesMatch "^(composer\.(json|lock)|\.env.*)$">
+    Require all denied
+</FilesMatch>
+
+# Закрываем папки backend-инфраструктуры от прямого доступа извне
+RedirectMatch 403 ^/(vendor|sql|scripts|uploads)(/.*)?$
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # /api/* — оставляем как есть (там свой .htaccess в api/.htaccess)
+    RewriteRule ^api/ - [L]
+
+    # Если запрошен реально существующий файл или папка — отдаём как есть
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Всё остальное — фолбэк на index.html (React SPA)
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+# Сжатие
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json image/svg+xml
+</IfModule>
+
+# Кеширование статики Vite (имена с хешем — можно кешировать долго)
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType image/png "access plus 30 days"
+    ExpiresByType image/jpeg "access plus 30 days"
+    ExpiresByType image/svg+xml "access plus 30 days"
+</IfModule>
+
+# index.html без кеша — чтобы пользователи видели свежий билд сразу
+<Files "index.html">
+    <IfModule mod_headers.c>
+        Header set Cache-Control "no-store, no-cache, must-revalidate"
+    </IfModule>
+</Files>
+
+# Базовые security-хедеры
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

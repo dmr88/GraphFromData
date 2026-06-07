@@ -1,0 +1,18 @@
+node_modules
+dist
+dist-ssr
+*.local
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.log
+.env
+.env.local
+.env.prod
+DEPLOY_BITRIXVM_8080.md
+ОТЧЁТ_О_ПРОЕКТЕ.md
+
+# Скомпилированные артефакты TS-конфигов (на случай если IDE их создаст)
+vite.config.js
+vite.config.d.ts

@@ -1,0 +1,17 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: graph-from-data:latest
+    container_name: graph-from-data
+    restart: unless-stopped
+    ports:
+      # Слева — порт на хосте. Поменяйте при необходимости (например, "8080:80")
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

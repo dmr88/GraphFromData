@@ -1,0 +1,23 @@
+# =====================================================================
+# Маршрутизация и защита API.
+# Делает URL'ы вида /api/login.php красивыми, на самом деле обращаясь
+# к /api/endpoints/login.php. И запрещает прямой доступ к lib/, config.
+# =====================================================================
+
+# Защита: блокируем прямой доступ к внутренним файлам
+<FilesMatch "^(config\.php|config\.example\.php|bootstrap\.php|composer\.(json|lock))$">
+    Require all denied
+</FilesMatch>
+
+# Блокируем доступ ко всей папке lib/
+RedirectMatch 403 ^/api/lib(/.*)?$
+
+# Включаем mod_rewrite
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /api/
+
+    # Если запрашивается /api/something.php и такой файл есть в endpoints/ — отдаём его
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^([a-zA-Z0-9_-]+)\.php$ endpoints/$1.php [L]
+</IfModule>

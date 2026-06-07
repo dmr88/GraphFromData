@@ -1,0 +1,83 @@
+# =====================================================================
+# Production-образ: фронтенд + PHP-бэкенд в одном контейнере (Apache).
+#
+# Сборка:    docker build -f Dockerfile.prod -t gfd:prod .
+# Запуск:    docker compose -f docker-compose.prod.yml up -d --build
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# Этап 1: сборка фронтенда (Node 20)
+# ---------------------------------------------------------------------
+FROM node:20-alpine AS frontend-build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+# --legacy-peer-deps: разрешаем lenient resolution (Vite 8 + plugin-react@4
+# не объявляют совместимость в peer-deps, но фактически работают).
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+COPY . .
+RUN npm run build
+# Результат — папка /app/dist (index.html, assets/, .xlsx, team/ и т.п.)
+
+# ---------------------------------------------------------------------
+# Этап 2: PHP 8.2 + Apache + composer-зависимости + готовый фронт
+# ---------------------------------------------------------------------
+FROM php:8.2-apache AS runtime
+
+# Системные библиотеки + PHP-расширения
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libzip-dev \
+        libpng-dev \
+        libjpeg-dev \
+        libfreetype-dev \
+        libonig-dev \
+        libxml2-dev \
+        unzip \
+        git \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) pdo_mysql gd zip mbstring xml \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# Apache: mod_rewrite + AllowOverride All для всех .htaccess
+RUN a2enmod rewrite headers \
+ && { \
+        echo '<Directory /var/www/html>'; \
+        echo '    AllowOverride All'; \
+        echo '    Require all granted'; \
+        echo '</Directory>'; \
+    } > /etc/apache2/conf-available/gfd-override.conf \
+ && a2enconf gfd-override
+
+# Лимиты PHP
+RUN { \
+        echo 'upload_max_filesize = 25M'; \
+        echo 'post_max_size = 30M'; \
+        echo 'memory_limit = 256M'; \
+        echo 'max_execution_time = 120'; \
+        echo 'date.timezone = Asia/Almaty'; \
+    } > /usr/local/etc/php/conf.d/gfd.ini
+
+WORKDIR /var/www/html
+
+# Composer-зависимости бэкенда (отдельный слой для кеша)
+COPY backend/composer.json backend/composer.lock* ./
+RUN composer install --no-dev --no-interaction --no-progress --optimize-autoloader \
+    || composer install --no-dev --no-interaction --no-progress
+
+# Бэкенд (api/, scripts/, sql/, uploads/)
+COPY backend/api    ./api
+COPY backend/scripts ./scripts
+COPY backend/sql     ./sql
+RUN mkdir -p uploads && chown -R www-data:www-data uploads
+
+# Корневой .htaccess для SPA-fallback
+COPY .htaccess.prod ./.htaccess
+
+# Готовый фронт из этапа сборки (index.html, assets/, *.xlsx, team/)
+COPY --from=frontend-build /app/dist/ ./
+
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+    CMD curl -fsS http://127.0.0.1/ > /dev/null || exit 1
